@@ -1,0 +1,32 @@
+# Local shared infra for Gratheon development.
+# Run with COMPOSE_PROJECT_NAME=gratheon so the network is "gratheon_default",
+# which all service compose files join. Host ports are shifted (5433/6383)
+# because 5432/6379 are often taken by other local projects.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: postgres
+    ports:
+      - 5433:5432
+    volumes:
+      - gratheon-postgres:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U test -d postgres']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --requirepass pass
+    ports:
+      - 6383:6379
+    restart: unless-stopped
+
+volumes:
+  gratheon-postgres:
