@@ -27,8 +27,12 @@ test('register, log out, log in, delete account', async ({ page }) => {
 
 	// delete account - the second button is the one in the confirm modal
 	await page.getByRole('link', { name: 'Account' }).click();
+	// web-app logs out and then calls window.location.reload(); the URL switches to
+	// /account/authenticate before that reload, so wait for it or it wipes the next login form
 	await page.getByRole('button', { name: 'Delete Account' }).click();
+	const reloaded = page.waitForEvent('load');
 	await page.getByRole('button', { name: 'Delete Account' }).last().click();
+	await reloaded;
 	await expect(page).toHaveURL(/\/account\/authenticate/);
 
 	// login failure - user is deleted

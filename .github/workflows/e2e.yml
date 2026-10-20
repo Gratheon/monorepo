@@ -1,0 +1,193 @@
+# Playwright UI tests against the full local stack (see README "Running locally").
+# Sibling repos are checked out next to monorepo/ the same way as on a dev machine,
+# so the workflow reuses the justfile recipes instead of duplicating compose commands.
+#
+# Triggers:
+# - nightly schedule catches regressions merged into any service repo
+# - push / PR here covers changes to the tests and the stack setup itself
+# - workflow_dispatch can test feature branches of service repos (ref inputs)
+# - repository_dispatch (type "service-updated", payload {"repo": "swarm-api", "ref": "<sha or branch>"})
+#   lets a service repo trigger a run for its own ref; needs a token with access to this repo
+name: e2e
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      schema_registry_ref:
+        description: tot-ra/graphql-schema-registry ref (default branch if empty)
+        required: false
+      graphql_router_ref:
+        description: graphql-router ref
+        required: false
+      swarm_api_ref:
+        description: swarm-api ref
+        required: false
+      image_splitter_ref:
+        description: image-splitter ref
+        required: false
+      user_cycle_ref:
+        description: user-cycle ref
+        required: false
+      web_app_ref:
+        description: web-app ref
+        required: false
+  repository_dispatch:
+    types: [service-updated]
+
+# dispatches for different service refs all run on this repo's default ref, keep them apart
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}-${{ github.event.client_payload.repo }}-${{ github.event.client_payload.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  COMPOSE_PROJECT_NAME: gratheon
+  # skip schema-registry UI webpack build, tests only need its API
+  WITH_WEBPACK: '0'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          path: monorepo
+
+      # empty ref = default branch of the repo
+      - name: Checkout schema-registry
+        uses: actions/checkout@v4
+        with:
+          repository: tot-ra/graphql-schema-registry
+          ref: ${{ inputs.schema_registry_ref || (github.event.client_payload.repo == 'schema-registry' && github.event.client_payload.ref) || '' }}
+          path: schema-registry
+      - name: Checkout graphql-router
+        uses: actions/checkout@v4
+        with:
+          repository: Gratheon/graphql-router
+          ref: ${{ inputs.graphql_router_ref || (github.event.client_payload.repo == 'graphql-router' && github.event.client_payload.ref) || '' }}
+          path: graphql-router
+      - name: Checkout swarm-api
+        uses: actions/checkout@v4
+        with:
+          repository: Gratheon/swarm-api
+          ref: ${{ inputs.swarm_api_ref || (github.event.client_payload.repo == 'swarm-api' && github.event.client_payload.ref) || '' }}
+          path: swarm-api
+      - name: Checkout image-splitter
+        uses: actions/checkout@v4
+        with:
+          repository: Gratheon/image-splitter
+          ref: ${{ inputs.image_splitter_ref || (github.event.client_payload.repo == 'image-splitter' && github.event.client_payload.ref) || '' }}
+          path: image-splitter
+      - name: Checkout user-cycle
+        uses: actions/checkout@v4
+        with:
+          repository: Gratheon/user-cycle
+          ref: ${{ inputs.user_cycle_ref || (github.event.client_payload.repo == 'user-cycle' && github.event.client_payload.ref) || '' }}
+          path: user-cycle
+      - name: Checkout web-app
+        uses: actions/checkout@v4
+        with:
+          repository: Gratheon/web-app
+          ref: ${{ inputs.web_app_ref || (github.event.client_payload.repo == 'web-app' && github.event.client_payload.ref) || '' }}
+          path: web-app
+
+      - name: Show checked out revisions
+        run: for r in monorepo schema-registry graphql-router swarm-api image-splitter user-cycle web-app; do echo "$r $(git -C $r rev-parse --abbrev-ref HEAD) $(git -C $r rev-parse --short HEAD)"; done
+
+      # web-app requires its .nvmrc Node (26); graphql-router host install uses it too.
+      # e2e switches to its own .nvmrc (24) later, see "Setup Node for e2e"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web-app/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web-app/.nvmrc
+
+      - uses: extractions/setup-just@v2
+
+      - name: Create local configs
+        working-directory: monorepo
+        run: just init-configs
+
+      - name: Start storage
+        working-directory: monorepo
+        run: just start-storage
+
+      - name: Start schema-registry and graphql-router
+        working-directory: monorepo
+        run: just start-router
+
+      - name: Start backend services
+        working-directory: monorepo
+        run: just start-be
+
+      - name: Start web-app
+        working-directory: web-app
+        run: |
+          pnpm install --frozen-lockfile
+          nohup pnpm dev > /tmp/web-app.log 2>&1 &
+
+      # playwright install hung while extracting chromium on Node 26, the e2e
+      # package is pinned to Node 24. vite keeps running on the Node it started with.
+      - name: Setup Node for e2e
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: monorepo/e2e/.nvmrc
+
+      - name: Install Playwright
+        working-directory: monorepo
+        timeout-minutes: 10
+        run: just e2e-install
+        env:
+          NVM_USE: "true"
+          E2E_INSTALL_ARGS: --with-deps
+
+      # graphql-router polls the registry every 30s, wait until every service is composed in:
+      # user (user-cycle), apiary (swarm-api), hello_image_splitter (image-splitter).
+      # web-app queries fail validation (e.g. Hive.beeCount) while one of them is missing.
+      - name: Wait for stack
+        timeout-minutes: 12
+        run: |
+          query='{"query":"{ __schema { queryType { fields { name } } } }"}'
+          check='["user", "apiary", "hello_image_splitter"] - [.data.__schema.queryType.fields[].name] == []'
+          timeout 600 bash -c "until curl -sf -H 'content-type: application/json' -d '$query' http://localhost:6100/graphql | jq -e '$check' >/dev/null; do sleep 5; done"
+          timeout 120 bash -c 'until curl -sf -o /dev/null http://localhost:8080/; do sleep 3; done'
+          # first request makes vite pre-bundle deps, keep that out of the first test's timeout
+          curl -sf -o /dev/null http://localhost:8080/account/register/
+
+      - name: Run e2e
+        working-directory: monorepo
+        timeout-minutes: 15
+        run: just e2e
+        env:
+          NVM_USE: "true"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            monorepo/e2e/playwright-report
+            monorepo/e2e/test-results
+          retention-days: 14
+
+      - name: Dump service logs
+        if: failure()
+        run: |
+          docker ps -a
+          for c in $(docker ps -aq); do
+            echo "::group::$(docker inspect -f '{{.Name}}' $c)"
+            docker logs --tail 300 $c 2>&1
+            echo "::endgroup::"
+          done
+          echo "::group::web-app"; cat /tmp/web-app.log || true; echo "::endgroup::"

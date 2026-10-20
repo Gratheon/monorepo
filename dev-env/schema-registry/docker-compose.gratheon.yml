@@ -1,0 +1,37 @@
+# Local override (gitignored): schema-registry joins the shared gratheon infra
+# (dev-env/docker-compose.yml) instead of starting its own postgres/redis.
+services:
+  gql-schema-registry:
+    build:
+      context: .
+      dockerfile: dev.Dockerfile
+    command: sh -c "npm install -g pnpm@10.29.2 && CI=true pnpm install --force && pnpm exec ts-node-dev --respawn src/schema-registry.ts --watch src --inspect"
+    ports:
+      - 6001:3000
+      - 6002:5850
+    volumes:
+      - .:/app/
+      - /app/node_modules
+    environment:
+      - ENV_ID=dev
+      - WITH_WEBPACK=${WITH_WEBPACK-1}
+      - DB_CLIENT=pg
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=test
+      - DB_SECRET=test
+      - DB_NAME=schema_registry
+      - DB_SSL=false
+      - ASYNC_SCHEMA_UPDATES=false
+      - REDIS_SCHEMA_UPDATES_CHANNEL=graphql-schema-updates
+      - REDIS_HOST=redis
+      - REDIS_SECRET=pass
+    restart: always
+    networks:
+      gratheon_default:
+        aliases:
+          - gql-schema-registry
+
+networks:
+  gratheon_default:
+    external: true

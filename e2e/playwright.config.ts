@@ -9,7 +9,8 @@ export default defineConfig({
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 2 : 0,
 	workers: process.env.CI ? 1 : undefined,
-	reporter: process.env.CI ? 'github' : 'html',
+	// html report is kept in CI too, the workflow uploads it as an artifact on failure
+	reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
 	use: {
 		baseURL: process.env.E2E_BASE_URL || 'http://localhost:8080',
 		trace: 'on-first-retry',
