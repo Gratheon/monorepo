@@ -102,8 +102,8 @@ jobs:
       - name: Show checked out revisions
         run: for r in monorepo schema-registry graphql-router swarm-api image-splitter user-cycle web-app; do echo "$r $(git -C $r rev-parse --abbrev-ref HEAD) $(git -C $r rev-parse --short HEAD)"; done
 
-      # one Node for everything: web-app requires its .nvmrc version (26), e2e and
-      # graphql-router host install work with it too
+      # web-app requires its .nvmrc Node (26); graphql-router host install uses it too.
+      # e2e switches to its own .nvmrc (24) later, see "Setup Node for e2e"
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: web-app/package.json
@@ -137,12 +137,21 @@ jobs:
           pnpm install --frozen-lockfile
           nohup pnpm dev > /tmp/web-app.log 2>&1 &
 
+      # playwright install hung while extracting chromium on Node 26, the e2e
+      # package is pinned to Node 24. vite keeps running on the Node it started with.
+      - name: Setup Node for e2e
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: monorepo/e2e/.nvmrc
+
       - name: Install Playwright
         working-directory: monorepo
+        timeout-minutes: 10
         run: make e2e-install NVM_USE=true E2E_INSTALL_ARGS=--with-deps
 
       # graphql-router polls the registry every 30s, wait until both services are composed in
       - name: Wait for stack
+        timeout-minutes: 12
         run: |
           query='{"query":"{ __schema { queryType { fields { name } } } }"}'
           timeout 600 bash -c "until curl -sf -H 'content-type: application/json' -d '$query' http://localhost:6100/graphql \
@@ -153,6 +162,7 @@ jobs:
 
       - name: Run e2e
         working-directory: monorepo
+        timeout-minutes: 15
         run: make e2e NVM_USE=true
 
       - name: Upload Playwright report
