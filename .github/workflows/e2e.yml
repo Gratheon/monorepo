@@ -124,10 +124,6 @@ jobs:
         working-directory: monorepo
         run: make start-router
 
-      # services push their schema to the registry on startup, so it must be up first
-      - name: Wait for schema-registry
-        run: timeout 300 bash -c 'until curl -sf -o /dev/null http://localhost:6001/; do sleep 5; done'
-
       - name: Start backend services
         working-directory: monorepo
         run: make start-be
