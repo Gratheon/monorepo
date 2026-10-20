@@ -39,8 +39,9 @@ on:
   repository_dispatch:
     types: [service-updated]
 
+# dispatches for different service refs all run on this repo's default ref, keep them apart
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.event_name }}-${{ github.ref }}-${{ github.event.client_payload.repo }}-${{ github.event.client_payload.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -149,13 +150,15 @@ jobs:
         timeout-minutes: 10
         run: make e2e-install NVM_USE=true E2E_INSTALL_ARGS=--with-deps
 
-      # graphql-router polls the registry every 30s, wait until both services are composed in
+      # graphql-router polls the registry every 30s, wait until every service is composed in:
+      # user (user-cycle), apiary (swarm-api), hello_image_splitter (image-splitter).
+      # web-app queries fail validation (e.g. Hive.beeCount) while one of them is missing.
       - name: Wait for stack
         timeout-minutes: 12
         run: |
           query='{"query":"{ __schema { queryType { fields { name } } } }"}'
-          timeout 600 bash -c "until curl -sf -H 'content-type: application/json' -d '$query' http://localhost:6100/graphql \
-            | jq -e '[.data.__schema.queryType.fields[].name] | (index(\"user\") != null) and (index(\"apiary\") != null)' >/dev/null; do sleep 5; done"
+          check='["user", "apiary", "hello_image_splitter"] - [.data.__schema.queryType.fields[].name] == []'
+          timeout 600 bash -c "until curl -sf -H 'content-type: application/json' -d '$query' http://localhost:6100/graphql | jq -e '$check' >/dev/null; do sleep 5; done"
           timeout 120 bash -c 'until curl -sf -o /dev/null http://localhost:8080/; do sleep 3; done'
           # first request makes vite pre-bundle deps, keep that out of the first test's timeout
           curl -sf -o /dev/null http://localhost:8080/account/register/
