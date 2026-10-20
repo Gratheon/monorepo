@@ -93,15 +93,20 @@ Known overlaps: `rate-limiter` publishes 6380-6382, clickstack ClickHouse (9001)
 Requirements: Docker, [just](https://github.com/casey/just), nvm (Node 24 for most repos, web-app needs Node 26 from its `.nvmrc`).
 
 ```sh
-make start-storage   # postgres + redis from dev-env/
-make start-router    # schema-registry, then graphql-router
-make start-be        # swarm-api (with migrations), image-splitter, user-cycle
-make start-fe        # web-app on http://localhost:8080
+just start           # everything below, web-app runs in the foreground
+just stop            # stops web-app and all containers (volumes are kept)
 ```
 
-or everything at once with `make start`. Stop with `make stop`.
+or step by step (`just` lists all recipes):
 
-Local config files are gitignored in each repo and must be created once with `make init-configs` (`dev-env/init-configs.sh`, existing files are kept):
+```sh
+just start-storage   # postgres + redis from dev-env/
+just start-router    # schema-registry, then graphql-router
+just start-be        # swarm-api (with migrations), image-splitter, user-cycle
+just start-fe        # web-app on http://localhost:8080
+```
+
+Local config files are gitignored in each repo and must be created once with `just init-configs` (`dev-env/init-configs.sh`, existing files are kept):
 
 | Repo | File | Based on |
 |---|---|---|
@@ -118,15 +123,15 @@ Browser tests that go through the whole stack (web-app -> router -> services) li
 They expect the stack above to be running and use a unique email per run, so they can be repeated against the same database.
 
 ```sh
-make e2e-install   # once: npm deps + chromium
-make e2e           # headless
-make e2e-ui        # Playwright UI mode
+just e2e-install   # once: npm deps + chromium
+just e2e           # headless
+just e2e-ui        # Playwright UI mode
 ```
 
 `E2E_BASE_URL` overrides the target (default `http://localhost:8080`). New tests can be recorded with `cd e2e && npm run codegen`.
 
 ### CI
 
-`.github/workflows/e2e.yml` runs the same setup on GitHub Actions: checks out the sibling repos next to `monorepo/`, runs `make init-configs`, starts the stack, serves web-app with vite and runs `make e2e` (`github` + html reporters, report uploaded as artifact on failure).
+`.github/workflows/e2e.yml` runs the same setup on GitHub Actions: checks out the sibling repos next to `monorepo/`, runs `just init-configs`, starts the stack, serves web-app with vite and runs `just e2e` (`github` + html reporters, report uploaded as artifact on failure).
 It runs nightly, on pushes/PRs to this repo and manually; manual runs accept a ref per service repo to test a feature branch.
 Service repos can trigger it with a `repository_dispatch` event of type `service-updated` and payload `{"repo": "swarm-api", "ref": "<branch or sha>"}`.

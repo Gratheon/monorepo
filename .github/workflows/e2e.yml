@@ -1,6 +1,6 @@
 # Playwright UI tests against the full local stack (see README "Running locally").
 # Sibling repos are checked out next to monorepo/ the same way as on a dev machine,
-# so the workflow reuses the Makefile targets instead of duplicating compose commands.
+# so the workflow reuses the justfile recipes instead of duplicating compose commands.
 #
 # Triggers:
 # - nightly schedule catches regressions merged into any service repo
@@ -112,21 +112,23 @@ jobs:
         with:
           node-version-file: web-app/.nvmrc
 
+      - uses: extractions/setup-just@v2
+
       - name: Create local configs
         working-directory: monorepo
-        run: make init-configs
+        run: just init-configs
 
       - name: Start storage
         working-directory: monorepo
-        run: make start-storage
+        run: just start-storage
 
       - name: Start schema-registry and graphql-router
         working-directory: monorepo
-        run: make start-router
+        run: just start-router
 
       - name: Start backend services
         working-directory: monorepo
-        run: make start-be
+        run: just start-be
 
       - name: Start web-app
         working-directory: web-app
@@ -144,7 +146,10 @@ jobs:
       - name: Install Playwright
         working-directory: monorepo
         timeout-minutes: 10
-        run: make e2e-install NVM_USE=true E2E_INSTALL_ARGS=--with-deps
+        run: just e2e-install
+        env:
+          NVM_USE: "true"
+          E2E_INSTALL_ARGS: --with-deps
 
       # graphql-router polls the registry every 30s, wait until every service is composed in:
       # user (user-cycle), apiary (swarm-api), hello_image_splitter (image-splitter).
@@ -162,7 +167,9 @@ jobs:
       - name: Run e2e
         working-directory: monorepo
         timeout-minutes: 15
-        run: make e2e NVM_USE=true
+        run: just e2e
+        env:
+          NVM_USE: "true"
 
       - name: Upload Playwright report
         if: failure()

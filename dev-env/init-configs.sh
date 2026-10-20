@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates the gitignored local config files of sibling repos (see README "Local config files").
 # Existing files are never overwritten, so it is safe to run on an already configured machine.
-# Used by `make init-configs` locally and by the e2e GitHub Actions workflow.
+# Used by `just init-configs` locally and by the e2e GitHub Actions workflow.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
