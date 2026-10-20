@@ -101,12 +101,12 @@ make start-fe        # web-app on http://localhost:8080
 
 or everything at once with `make start`. Stop with `make stop`.
 
-Local config files are gitignored in each repo and must be created once:
+Local config files are gitignored in each repo and must be created once with `make init-configs` (`dev-env/init-configs.sh`, existing files are kept):
 
 | Repo | File | Based on |
 |---|---|---|
-| schema-registry | `docker-compose.gratheon.yml` | git history; points to the shared postgres/redis |
-| swarm-api | `config/config.dev.json` | `config/config.example.json` + JWT key |
+| schema-registry | `docker-compose.gratheon.yml` | `dev-env/schema-registry/docker-compose.gratheon.yml`; points to the shared postgres/redis |
+| swarm-api | `config/config.dev.json` | `config/config.example.json` + JWT key (user-cycle dev `JWT_KEY`, or `JWT_KEY` env) |
 | image-splitter | `src/config/config.dev.ts` | `config.default.ts`, postgres ssl disabled |
 | user-cycle | `src/config/config.dev.ts` | `config.default.ts`, postgres ssl disabled |
 
@@ -124,3 +124,9 @@ make e2e-ui        # Playwright UI mode
 ```
 
 `E2E_BASE_URL` overrides the target (default `http://localhost:8080`). New tests can be recorded with `cd e2e && npm run codegen`.
+
+### CI
+
+`.github/workflows/e2e.yml` runs the same setup on GitHub Actions: checks out the sibling repos next to `monorepo/`, runs `make init-configs`, starts the stack, serves web-app with vite and runs `make e2e` (`github` + html reporters, report uploaded as artifact on failure).
+It runs nightly, on pushes/PRs to this repo and manually; manual runs accept a ref per service repo to test a feature branch.
+Service repos can trigger it with a `repository_dispatch` event of type `service-updated` and payload `{"repo": "swarm-api", "ref": "<branch or sha>"}`.
